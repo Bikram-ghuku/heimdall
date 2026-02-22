@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/likexian/whois"
+	"google.golang.org/api/idtoken"
 	"github.com/pquerna/otp/totp"
 	"github.com/rs/cors"
 	"github.com/joho/godotenv"
@@ -94,6 +96,68 @@ func jwtKeyFunc(*jwt.Token) (interface{}, error) {
 func isDevelopmentMode() bool {
 	val := strings.ToLower(strings.TrimSpace(os.Getenv("DEVELOPMENT_MODE")))
 	return val == "true"
+}
+
+func isAllowedInstituteEmail(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	return strings.HasSuffix(email, "@kgpian.iitkgp.ac.in") || strings.HasSuffix(email, "@iitkgp.ac.in")
+}
+
+func issueLoginCookie(res http.ResponseWriter, email string) error {
+	signingKey, err := getJwtKey()
+	if err != nil {
+		return err
+	}
+
+	expiryDays, err := strconv.Atoi(os.Getenv("JWT_EXPIRY_DAYS"))
+	if err != nil || expiryDays < 1 { // keep 1 day as minimum valid period
+		fmt.Println("Invalid JWT_EXPIRY_DAYS env set. Defaulting to 90 days (3 months)")
+		expiryDays = 90 // Default to 90 days (3 months)
+	}
+
+	issueTime := time.Now()
+	expiryTime := issueTime.AddDate(0, 0, expiryDays)
+
+	claims := &LoginJwtClaims{
+		LoginJwtFields: LoginJwtFields{Email: email},
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(issueTime),
+			ExpiresAt: jwt.NewNumericDate(expiryTime),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(signingKey))
+	if err != nil {
+		return err
+	}
+
+	// Cookie configuration adapts to development mode to simplify local testing.
+	dev := isDevelopmentMode()
+	cookieDomain := COOKIE_DOMAIN
+	secureCookie := true
+	sameSiteMode := http.SameSiteNoneMode
+	if dev {
+		// In development we typically run on http://localhost so Secure cookies would be dropped by browsers.
+		cookieDomain = "localhost"
+		secureCookie = false
+		// Lax prevents most CSRF while still allowing form navigations; suitable for local dev.
+		sameSiteMode = http.SameSiteLaxMode
+	}
+
+	cookie := http.Cookie{
+		Name:     "heimdall",
+		Value:    tokenString,
+		Expires:  expiryTime,
+		HttpOnly: true,
+		Secure:   secureCookie,
+		SameSite: sameSiteMode,
+		Path:     "/",
+		Domain:   cookieDomain,
+	}
+
+	http.SetCookie(res, &cookie)
+	return nil
 }
 
 func generateOtp(user User) (bool, error) {
@@ -192,7 +256,7 @@ func handleGetOtp(res http.ResponseWriter, req *http.Request) {
 	}
 
 	// check for institute email
-	if !strings.HasSuffix(email, "@kgpian.iitkgp.ac.in") && !strings.HasSuffix(email, "@iitkgp.ac.in") {
+	if !isAllowedInstituteEmail(email) {
 		http.Error(res, "Invalid email domain. Only @kgpian.iitkgp.ac.in & @iitkgp.ac.in are allowed", http.StatusBadRequest)
 		return
 	}
@@ -288,66 +352,72 @@ func handleVerifyOtp(res http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	signingKey, err := getJwtKey()
+	if err := issueLoginCookie(res, user.Email); err != nil {
+		fmt.Println(err)
+		http.Error(res, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	res.WriteHeader(http.StatusOK)
+	res.Header().Set("Content-Type", "text/plain")
+	res.Write([]byte("OTP Verified Successfully"))
+}
+
+type googleAuthRequest struct {
+	Credential string `json:"credential"`
+}
+
+type googleAuthResponse struct {
+	Email string `json:"email"`
+}
+
+func handleGoogleAuth(res http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodOptions {
+		res.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var body googleAuthRequest
+	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		http.Error(res, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(body.Credential) == "" {
+		http.Error(res, "Missing credential", http.StatusBadRequest)
+		return
+	}
+
+	clientID := strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID"))
+	if clientID == "" {
+		http.Error(res, "Google OAuth client not configured", http.StatusInternalServerError)
+		return
+	}
+
+	payload, err := idtoken.Validate(context.Background(), body.Credential, clientID)
 	if err != nil {
+		http.Error(res, "Invalid Google credential", http.StatusUnauthorized)
+		return
+	}
+
+	email, _ := payload.Claims["email"].(string)
+	verified, _ := payload.Claims["email_verified"].(bool)
+	if !verified {
+		http.Error(res, "Google account email not verified", http.StatusUnauthorized)
+		return
+	}
+	if !isAllowedInstituteEmail(email) {
+		http.Error(res, "Invalid email domain. Only @kgpian.iitkgp.ac.in & @iitkgp.ac.in are allowed", http.StatusUnauthorized)
+		return
+	}
+
+	if err := issueLoginCookie(res, email); err != nil {
 		fmt.Println(err)
 		http.Error(res, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	expiryDays, err := strconv.Atoi(os.Getenv("JWT_EXPIRY_DAYS"))
-	if err != nil || expiryDays < 1 { // keep 1 day as minimum valid period
-		fmt.Println("Invalid JWT_EXPIRY_DAYS env set. Defaulting to 90 days (3 months)")
-		expiryDays = 90 // Default to 90 days (3 months)
-	}
-
-	issueTime := time.Now()
-	expiryTime := issueTime.AddDate(0, 0, expiryDays)
-
-	claims := &LoginJwtClaims{
-		LoginJwtFields: LoginJwtFields{Email: user.Email},
-		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt:  jwt.NewNumericDate(issueTime),
-			ExpiresAt: jwt.NewNumericDate(expiryTime),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(signingKey))
-	if err != nil {
-		fmt.Println("Could not parse sign token")
-		http.Error(res, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
-	// Cookie configuration adapts to development mode to simplify local testing.
-	dev := isDevelopmentMode()
-	cookieDomain := COOKIE_DOMAIN
-	secureCookie := true
-	sameSiteMode := http.SameSiteNoneMode
-	if dev {
-		// In development we typically run on http://localhost so Secure cookies would be dropped by browsers.
-		cookieDomain = "localhost"
-		secureCookie = false
-		// Lax prevents most CSRF while still allowing form navigations; suitable for local dev.
-		sameSiteMode = http.SameSiteLaxMode
-	}
-
-	cookie := http.Cookie{
-		Name:     "heimdall",
-		Value:    tokenString,
-		Expires:  expiryTime,
-		HttpOnly: true,
-		Secure:   secureCookie,
-		SameSite: sameSiteMode,
-		Path:     "/",
-		Domain:   cookieDomain,
-	}
-
-	http.SetCookie(res, &cookie)
+	res.Header().Set("Content-Type", "application/json")
 	res.WriteHeader(http.StatusOK)
-	res.Header().Set("Content-Type", "text/plain")
-	res.Write([]byte("OTP Verified Successfully"))
+	_ = json.NewEncoder(res).Encode(googleAuthResponse{Email: email})
 }
 
 func handleValidateJwt(res http.ResponseWriter, req *http.Request) {
@@ -419,6 +489,8 @@ func main() {
 	generalCors := cors.New(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowCredentials: true,
+		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodOptions},
+		AllowedHeaders:   []string{"Content-Type"},
 	})
 
 	specialCors := cors.AllowAll()
@@ -427,9 +499,10 @@ func main() {
 	mux.Handle("/", specialCors.Handler(http.HandlerFunc(handleCampusCheck)))
 	mux.Handle("/get-otp", generalCors.Handler(http.HandlerFunc(handleGetOtp)))
 	mux.Handle("/verify-otp", generalCors.Handler(http.HandlerFunc(handleVerifyOtp)))
+	mux.Handle("/auth/google", generalCors.Handler(http.HandlerFunc(handleGoogleAuth)))
 	mux.Handle("/validate-jwt", generalCors.Handler(http.HandlerFunc(handleValidateJwt)))
 
-	handler := cors.AllowAll().Handler(mux)
+	handler := mux
 
 	fmt.Println("Heimdall Server running on port : 3333")
 	err := http.ListenAndServe(":3333", LoggerMiddleware(handler))

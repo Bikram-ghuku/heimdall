@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { validateEmail } from "./utils";
 import toast from "react-hot-toast";
 import { BACKEND_URL } from "./constants";
@@ -16,6 +16,8 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
     const [timer, setTimer] = useState("01:00");
     const [timerStart, setTimerStart] = useState<number | null>(null);
 
+    const googleButtonRef = useRef<HTMLDivElement | null>(null);
+
     useEffect(() => {
         fetch(`${BACKEND_URL}/validate-jwt`, { credentials: "include" }).then(
             (response) => {
@@ -28,6 +30,74 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
             },
         );
     }, []);
+
+    useEffect(() => {
+        if (isAuthenticated) return;
+        if (otpRequested) return;
+
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as
+            | string
+            | undefined;
+        if (!clientId) return;
+
+        const google = (window as any).google;
+        if (!google?.accounts?.id) return;
+        if (!googleButtonRef.current) return;
+
+        google.accounts.id.initialize({
+            client_id: clientId,
+            callback: async (credentialResponse: { credential?: string }) => {
+                if (!credentialResponse?.credential) {
+                    toast.error("Google sign-in failed. Please try again.");
+                    return;
+                }
+
+                const loadingToast = toast.loading("Signing in with Google...");
+                try {
+                    const response = await fetch(`${BACKEND_URL}/auth/google`, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        credentials: "include",
+                        body: JSON.stringify({
+                            credential: credentialResponse.credential,
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        const msg = await response.text();
+                        toast.error(
+                            msg || "Google sign-in failed. Please try again.",
+                            { id: loadingToast },
+                        );
+                        return;
+                    }
+
+                    const data = (await response.json()) as { email?: string };
+                    if (data?.email) setEmail(data.email);
+                    toast.success("Signed in successfully", {
+                        id: loadingToast,
+                    });
+                    setIsAuthenticated(true);
+                } catch {
+                    toast.error("Google sign-in failed. Please try again.", {
+                        id: loadingToast,
+                    });
+                }
+            },
+        });
+
+        // Clear any previously rendered button before rendering again.
+        googleButtonRef.current.innerHTML = "";
+        google.accounts.id.renderButton(googleButtonRef.current, {
+            type: "standard",
+            theme: "outline",
+            size: "large",
+            text: "continue_with",
+            shape: "rectangular",
+        });
+    }, [isAuthenticated, otpRequested]);
 
     useEffect(() => {
         if (!otpRequested || timerStart === null) return;
@@ -84,7 +154,9 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
                     });
                 });
         } else {
-            toast.error("Invalid email address. Please use your institute email");
+            toast.error(
+                "Invalid email address. Please use your institute email",
+            );
             return;
         }
     };
@@ -130,6 +202,7 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
                 <p>Please verify using your institute email to continue</p>
             </div>
             <div className="form">
+                {!otpRequested ? <div ref={googleButtonRef} /> : null}
                 <input
                     type="email"
                     value={email}
