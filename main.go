@@ -160,6 +160,33 @@ func issueLoginCookie(res http.ResponseWriter, email string) error {
 	return nil
 }
 
+func clearLoginCookie(res http.ResponseWriter) {
+	dev := isDevelopmentMode()
+	cookieDomain := COOKIE_DOMAIN
+	secureCookie := true
+	sameSiteMode := http.SameSiteNoneMode
+	if dev {
+		cookieDomain = "localhost"
+		secureCookie = false
+		sameSiteMode = http.SameSiteLaxMode
+	}
+
+	// To delete a cookie reliably, set MaxAge < 0 and an Expires date in the past.
+	cookie := http.Cookie{
+		Name:     "heimdall",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   secureCookie,
+		SameSite: sameSiteMode,
+		Path:     "/",
+		Domain:   cookieDomain,
+	}
+
+	http.SetCookie(res, &cookie)
+}
+
 func generateOtp(user User) (bool, error) {
 	validPeriod, err := strconv.Atoi(os.Getenv("OTP_VALIDITY_PERIOD"))
 	if err != nil || validPeriod < 30 { // keep 30s as minimum valid period
@@ -420,6 +447,18 @@ func handleGoogleAuth(res http.ResponseWriter, req *http.Request) {
 	_ = json.NewEncoder(res).Encode(googleAuthResponse{Email: email})
 }
 
+func handleLogout(res http.ResponseWriter, req *http.Request) {
+	if req.Method == http.MethodOptions {
+		res.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	clearLoginCookie(res)
+	res.Header().Set("Content-Type", "text/plain")
+	res.WriteHeader(http.StatusOK)
+	res.Write([]byte("Logged out"))
+}
+
 func handleValidateJwt(res http.ResponseWriter, req *http.Request) {
 	cookie, err := req.Cookie("heimdall")
 	if err != nil {
@@ -500,6 +539,7 @@ func main() {
 	mux.Handle("/get-otp", generalCors.Handler(http.HandlerFunc(handleGetOtp)))
 	mux.Handle("/verify-otp", generalCors.Handler(http.HandlerFunc(handleVerifyOtp)))
 	mux.Handle("/auth/google", generalCors.Handler(http.HandlerFunc(handleGoogleAuth)))
+	mux.Handle("/logout", generalCors.Handler(http.HandlerFunc(handleLogout)))
 	mux.Handle("/validate-jwt", generalCors.Handler(http.HandlerFunc(handleValidateJwt)))
 
 	handler := mux

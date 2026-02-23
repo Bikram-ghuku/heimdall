@@ -6,7 +6,7 @@ const Success = ({ email }: { email: string }) => {
     const [searchParams] = useSearchParams();
     const givenRedirectUrl = searchParams.get("redirect_url");
     const { serviceName, serviceLink } = validRedirect(givenRedirectUrl);
-    console.log(serviceName, serviceLink)
+    console.log(serviceName, serviceLink);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -16,7 +16,7 @@ const Success = ({ email }: { email: string }) => {
             } else {
                 window.open(serviceLink, "_self");
             }
-        }, 3000);
+        }, 2000);
 
         return () => clearTimeout(timer);
     }, [serviceLink]);

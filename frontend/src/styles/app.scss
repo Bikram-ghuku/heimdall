@@ -138,5 +138,19 @@
         font-size: 1.1rem;
         font-weight: 600;
         cursor: pointer;
+        text-decoration: none;
+    }
+
+    .logout {
+        display: block;
+        margin-top: 1rem;
+        padding: 0.5rem 0.8rem;
+        border-radius: 5px;
+        border: 2px solid #d9534f;
+        color: #d9534f;
+        font-size: 1.1rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
     }
 }
