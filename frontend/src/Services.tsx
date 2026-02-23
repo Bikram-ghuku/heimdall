@@ -1,6 +1,19 @@
 import { ALLOWED_SERVICES } from "./constants";
+import { BACKEND_URL } from "./constants";
 
 const Services = () => {
+    const logout = async () => {
+        try {
+            await fetch(`${BACKEND_URL}/logout`, {
+                method: "POST",
+                credentials: "include",
+            });
+        } finally {
+            // Reset app state by navigating back to the login route.
+            window.location.assign("/");
+        }
+    };
+
     return (
         <div className="services-container">
             <div className="title">MetaKGP Services</div>
@@ -12,6 +25,16 @@ const Services = () => {
                     {serviceName}
                 </a>
             ))}
+            <a
+                className="logout"
+                href="#"
+                onClick={(e) => {
+                    e.preventDefault();
+                    void logout();
+                }}
+            >
+                Logout
+            </a>
         </div>
     );
 };

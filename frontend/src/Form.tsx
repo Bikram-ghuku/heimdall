@@ -3,6 +3,7 @@ import { validateEmail } from "./utils";
 import toast from "react-hot-toast";
 import { BACKEND_URL } from "./constants";
 import Success from "./Success";
+import { GoogleLogin } from "@react-oauth/google";
 
 type FormProps = {
     isAuthenticated: boolean;
@@ -28,6 +29,46 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
             },
         );
     }, []);
+
+    const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as
+        | string
+        | undefined;
+
+    const handleGoogleCredential = async (credential?: string) => {
+        if (!credential) {
+            toast.error("Google sign-in failed. Please try again.");
+            return;
+        }
+
+        const loadingToast = toast.loading("Signing in with Google...");
+        try {
+            const response = await fetch(`${BACKEND_URL}/auth/google`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                credentials: "include",
+                body: JSON.stringify({ credential }),
+            });
+
+            if (!response.ok) {
+                const msg = await response.text();
+                toast.error(msg || "Google sign-in failed. Please try again.", {
+                    id: loadingToast,
+                });
+                return;
+            }
+
+            const data = (await response.json()) as { email?: string };
+            if (data?.email) setEmail(data.email);
+            toast.success("Signed in successfully", { id: loadingToast });
+            setIsAuthenticated(true);
+        } catch {
+            toast.error("Google sign-in failed. Please try again.", {
+                id: loadingToast,
+            });
+        }
+    };
 
     useEffect(() => {
         if (!otpRequested || timerStart === null) return;
@@ -84,7 +125,9 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
                     });
                 });
         } else {
-            toast.error("Invalid email address. Please use your institute email");
+            toast.error(
+                "Invalid email address. Please use your institute email",
+            );
             return;
         }
     };
@@ -130,6 +173,25 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
                 <p>Please verify using your institute email to continue</p>
             </div>
             <div className="form">
+                {!otpRequested && googleClientId ? (
+                    <GoogleLogin
+                        onSuccess={(res) =>
+                            handleGoogleCredential(res.credential)
+                        }
+                        onError={() =>
+                            toast.error(
+                                "Google sign-in failed. Please try again.",
+                            )
+                        }
+                        hosted_domain="kgpian.iitkgp.ac.in"
+                        useOneTap
+                        auto_select
+                        theme="outline"
+                        text="continue_with"
+                        shape="rectangular"
+                        size="large"
+                    />
+                ) : null}
                 <input
                     type="email"
                     value={email}
