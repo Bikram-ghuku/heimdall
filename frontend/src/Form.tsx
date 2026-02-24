@@ -174,7 +174,7 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
             </div>
             <div className="form">
                 {!otpRequested && googleClientId ? (
-                    <div className="google-login">
+                    <div className="google-signin-container">
                         <GoogleLogin
                             onSuccess={(res) =>
                                 handleGoogleCredential(res.credential)
@@ -192,6 +192,7 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
                             shape="rectangular"
                             size="large"
                         />
+                        <h4>Or get an OTP on your institute email</h4>
                     </div>
                 ) : null}
                 <input
