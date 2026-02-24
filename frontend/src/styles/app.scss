@@ -34,6 +34,21 @@
         flex-direction: column;
         gap: 0.5rem;
 
+        .google-login {
+            width: 100%;
+            display: flex;
+
+            > div {
+                width: 100%;
+            }
+
+            iframe {
+                width: 100% !important;
+                max-width: 100% !important;
+                display: block;
+            }
+        }
+
         input {
             padding: 0.5rem;
             border: 1px solid #ccc;

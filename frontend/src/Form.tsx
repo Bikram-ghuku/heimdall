@@ -174,23 +174,25 @@ const Form = ({ isAuthenticated, setIsAuthenticated }: FormProps) => {
             </div>
             <div className="form">
                 {!otpRequested && googleClientId ? (
-                    <GoogleLogin
-                        onSuccess={(res) =>
-                            handleGoogleCredential(res.credential)
-                        }
-                        onError={() =>
-                            toast.error(
-                                "Google sign-in failed. Please try again.",
-                            )
-                        }
-                        hosted_domain="kgpian.iitkgp.ac.in"
-                        useOneTap
-                        auto_select
-                        theme="outline"
-                        text="continue_with"
-                        shape="rectangular"
-                        size="large"
-                    />
+                    <div className="google-login">
+                        <GoogleLogin
+                            onSuccess={(res) =>
+                                handleGoogleCredential(res.credential)
+                            }
+                            onError={() =>
+                                toast.error(
+                                    "Google sign-in failed. Please try again.",
+                                )
+                            }
+                            hosted_domain="kgpian.iitkgp.ac.in"
+                            useOneTap
+                            auto_select
+                            theme="outline"
+                            text="continue_with"
+                            shape="rectangular"
+                            size="large"
+                        />
+                    </div>
                 ) : null}
                 <input
                     type="email"
